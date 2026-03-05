@@ -1,40 +1,30 @@
-/* Add this to the very top of your main CSS file */
-html, body {
-  width: 100vw !important;
-  max-width: 100vw !important;
-  overflow-x: hidden !important;
-  margin: 0 !important;
-  padding: 0 !important;
-}
-
-#root, .App {
-  max-width: 100% !important;
-  overflow-x: hidden !important;
-}
-
-html, body {
-  max-width: 100vw;
-  overflow-x: hidden; /* Stops horizontal scrolling */
-  margin: 0;
-  padding: 0;
-}
-
-* {
-  box-sizing: border-box; /* Ensures padding doesn't push elements off-screen */
-}
-
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 @layer base {
   :root {
     --font-sans: 'Inter', sans-serif;
     --font-display: 'Space Grotesk', sans-serif;
 
-    /* Clean Minimal Dark Theme Default */
     --background: 0 0% 4%;
     --foreground: 0 0% 98%;
 
@@ -46,7 +36,6 @@ html, body {
     --popover-foreground: 0 0% 98%;
     --popover-border: 0 0% 12%;
 
-    /* Crisp white for primary actions */
     --primary: 0 0% 98%;
     --primary-foreground: 0 0% 0%;
     --primary-border: 0 0% 80%;
@@ -71,7 +60,6 @@ html, body {
     --input: 0 0% 12%;
     --ring: 0 0% 80%;
 
-    /* Sidebar specifics */
     --sidebar: 0 0% 6%;
     --sidebar-foreground: 0 0% 80%;
     --sidebar-border: 0 0% 12%;

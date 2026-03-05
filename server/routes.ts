@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
-import { startScraper, checkProduct } from "./scraper";
+import { startScraper, checkProductAndRecord } from "./scraper";
 
 async function seedDatabase() {
   try {
@@ -29,7 +29,6 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Products
   app.get(api.products.list.path, async (req, res) => {
     const products = await storage.getProducts();
     res.json(products);
@@ -80,14 +79,16 @@ export async function registerRoutes(
       return res.status(404).json({ message: "Product not found" });
     }
 
-    const newStatus = await checkProduct(product.url);
-    const now = new Date();
-    
-    await storage.updateProduct(id, { status: newStatus, lastCheckedAt: now });
-    res.json({ success: true, status: newStatus });
+    const result = await checkProductAndRecord(id);
+    res.json({ success: true, status: result.status, rawStatus: result.rawStatus });
   });
 
-  // Settings
+  app.get(api.history.list.path, async (req, res) => {
+    const id = Number(req.params.id);
+    const history = await storage.getHistoryByProduct(id);
+    res.json(history);
+  });
+
   app.get(api.settings.get.path, async (req, res) => {
     const settings = await storage.getSettings();
     res.json(settings || null);
@@ -109,7 +110,6 @@ export async function registerRoutes(
     }
   });
 
-  // Initialize background jobs
   seedDatabase();
   startScraper();
 

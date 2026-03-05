@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, buildUrl, type ProductResponse, type ProductInput } from "@shared/routes";
+import { api, buildUrl, type ProductInput } from "@shared/routes";
 
 export function useProducts() {
   return useQuery({
@@ -7,8 +7,7 @@ export function useProducts() {
     queryFn: async () => {
       const res = await fetch(api.products.list.path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch products");
-      const data = await res.json();
-      return api.products.list.responses[200].parse(data);
+      return res.json();
     },
   });
 }
@@ -20,12 +19,11 @@ export function useCreateProduct() {
       const res = await fetch(api.products.create.path, {
         method: api.products.create.method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(api.products.create.input.parse(input)),
+        body: JSON.stringify(input),
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to create product");
-      const data = await res.json();
-      return api.products.create.responses[201].parse(data);
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.products.list.path] });
@@ -41,12 +39,11 @@ export function useUpdateProduct() {
       const res = await fetch(url, {
         method: api.products.update.method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(api.products.update.input.parse(updates)),
+        body: JSON.stringify(updates),
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to update product");
-      const data = await res.json();
-      return api.products.update.responses[200].parse(data);
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.products.list.path] });
@@ -81,11 +78,25 @@ export function useCheckProduct() {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to check product status");
-      const data = await res.json();
-      return api.products.checkNow.responses[200].parse(data);
+      return res.json() as Promise<{ success: boolean; status: string; rawStatus: string }>;
     },
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: [api.products.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products", id, "history"] });
     },
+  });
+}
+
+export function useProductHistory(productId: number | null) {
+  return useQuery({
+    queryKey: ["/api/products", productId, "history"],
+    queryFn: async () => {
+      if (!productId) return [];
+      const url = buildUrl(api.history.list.path, { id: productId });
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch history");
+      return res.json();
+    },
+    enabled: productId !== null,
   });
 }

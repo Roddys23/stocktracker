@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { insertProductSchema, products, settings, insertSettingsSchema } from "./schema";
+import { insertProductSchema, products, settings, statusHistory, insertSettingsSchema } from "./schema";
 
 export const errorSchemas = {
   validation: z.object({
@@ -54,10 +54,19 @@ export const api = {
       method: "POST" as const,
       path: "/api/products/:id/check" as const,
       responses: {
-        200: z.object({ success: z.boolean(), status: z.string() }),
+        200: z.object({ success: z.boolean(), status: z.string(), rawStatus: z.string() }),
         404: errorSchemas.notFound,
-      }
-    }
+      },
+    },
+  },
+  history: {
+    list: {
+      method: "GET" as const,
+      path: "/api/products/:id/history" as const,
+      responses: {
+        200: z.array(z.custom<typeof statusHistory.$inferSelect>()),
+      },
+    },
   },
   settings: {
     get: {
@@ -95,3 +104,4 @@ export type ProductResponse = z.infer<typeof api.products.list.responses[200]>[0
 export type SettingsResponse = z.infer<typeof api.settings.get.responses[200]>;
 export type ProductInput = z.infer<typeof api.products.create.input>;
 export type SettingsInput = z.infer<typeof api.settings.update.input>;
+export type StatusHistoryResponse = z.infer<typeof api.history.list.responses[200]>[0];

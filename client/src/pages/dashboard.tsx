@@ -1,6 +1,7 @@
-import { formatDistanceToNow } from "date-fns";
-import { Link2, RefreshCw, Trash2, Activity, ExternalLink } from "lucide-react";
-import { useProducts, useDeleteProduct, useUpdateProduct, useCheckProduct } from "@/hooks/use-products";
+import { useState } from "react";
+import { formatDistanceToNow, format } from "date-fns";
+import { Link2, RefreshCw, Trash2, Activity, ExternalLink, History, X } from "lucide-react";
+import { useProducts, useDeleteProduct, useUpdateProduct, useCheckProduct, useProductHistory } from "@/hooks/use-products";
 import { useToast } from "@/hooks/use-toast";
 import { Layout } from "@/components/layout";
 import { AddProductDialog } from "@/components/add-product-dialog";
@@ -8,6 +9,13 @@ import { StatusBadge } from "@/components/status-badge";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -23,6 +31,10 @@ export default function Dashboard() {
   const updateProduct = useUpdateProduct();
   const checkProduct = useCheckProduct();
   const { toast } = useToast();
+  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const { data: history, isLoading: historyLoading } = useProductHistory(selectedProductId);
+
+  const selectedProduct = products?.find((p: any) => p.id === selectedProductId);
 
   const handleToggleActive = (id: number, isActive: boolean) => {
     updateProduct.mutate({ id, isActive });
@@ -38,25 +50,25 @@ export default function Dashboard() {
     }
   };
 
-  const handleCheckNow = (id: number) => {
+  const handleCheckNow = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
     checkProduct.mutate(id, {
       onSuccess: (data) => {
-        toast({ 
-          title: "Check complete", 
-          description: `Current status: ${data.status}` 
+        toast({
+          title: "Check complete",
+          description: `Status: ${data.status} (detected: ${data.rawStatus})`
         });
       },
       onError: () => {
-        toast({ 
+        toast({
           variant: "destructive",
-          title: "Check failed", 
-          description: "Could not fetch current status." 
+          title: "Check failed",
+          description: "Could not fetch current status."
         });
       }
     });
   };
 
-  // Helper to extract domain for clean display
   const getDomain = (urlStr: string) => {
     try {
       return new URL(urlStr).hostname.replace('www.', '');
@@ -67,15 +79,101 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold font-display tracking-tight text-foreground">Monitored Products</h1>
-          <p className="text-muted-foreground mt-1">Keep track of inventory changes in real-time.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight text-foreground" data-testid="text-page-title">Monitored Products</h1>
+          <p className="text-muted-foreground mt-1 text-sm sm:text-base">Track inventory changes in real-time.</p>
         </div>
         <AddProductDialog />
       </div>
 
-      <Card className="border border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden shadow-2xl shadow-black/10">
+      {/* Mobile card layout */}
+      <div className="block md:hidden space-y-3">
+        {isLoading ? (
+          <Card className="border border-border/50 bg-card/50 p-8">
+            <div className="flex flex-col items-center justify-center gap-3">
+              <Activity className="h-8 w-8 animate-pulse text-muted-foreground/50" />
+              <span className="text-muted-foreground">Loading products...</span>
+            </div>
+          </Card>
+        ) : !products || products.length === 0 ? (
+          <Card className="border border-border/50 bg-card/50 p-8">
+            <div className="flex flex-col items-center justify-center gap-3">
+              <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center">
+                <Link2 className="h-6 w-6 text-muted-foreground/50" />
+              </div>
+              <span className="text-muted-foreground">No products being monitored.</span>
+              <span className="text-sm text-muted-foreground">Tap "Add Product" to get started.</span>
+            </div>
+          </Card>
+        ) : (
+          products.map((product: any) => (
+            <Card
+              key={product.id}
+              className="border border-border/50 bg-card/50 p-4 cursor-pointer active:bg-accent/30 transition-colors"
+              onClick={() => setSelectedProductId(product.id)}
+              data-testid={`card-product-${product.id}`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold truncate text-foreground/90" data-testid={`text-label-${product.id}`}>{product.label}</p>
+                  <a
+                    href={product.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-muted-foreground flex items-center gap-1 mt-1 truncate w-fit"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                    {getDomain(product.url)}
+                  </a>
+                </div>
+                <StatusBadge status={product.status} />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {product.lastCheckedAt
+                    ? formatDistanceToNow(new Date(product.lastCheckedAt), { addSuffix: true })
+                    : "Never checked"}
+                </span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Switch
+                    checked={product.isActive}
+                    onCheckedChange={(checked) => {
+                      handleToggleActive(product.id, checked);
+                    }}
+                    disabled={updateProduct.isPending}
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid={`switch-active-${product.id}`}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => handleCheckNow(product.id, e)}
+                    disabled={checkProduct.isPending && checkProduct.variables === product.id}
+                    data-testid={`button-check-${product.id}`}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${checkProduct.isPending && checkProduct.variables === product.id ? 'animate-spin' : ''}`} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }}
+                    disabled={deleteProduct.isPending && deleteProduct.variables === product.id}
+                    className="text-muted-foreground"
+                    data-testid={`button-delete-${product.id}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Desktop table layout */}
+      <Card className="hidden md:block border border-border/50 bg-card/50 backdrop-blur-sm shadow-2xl shadow-black/10">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader className="bg-muted/30">
@@ -110,16 +208,22 @@ export default function Dashboard() {
                   </TableCell>
                 </TableRow>
               ) : (
-                products.map((product) => (
-                  <TableRow key={product.id} className="border-border/50 group transition-colors">
+                products.map((product: any) => (
+                  <TableRow
+                    key={product.id}
+                    className="border-border/50 group transition-colors cursor-pointer"
+                    onClick={() => setSelectedProductId(product.id)}
+                    data-testid={`row-product-${product.id}`}
+                  >
                     <TableCell>
                       <div className="flex flex-col max-w-[300px]">
-                        <span className="font-semibold truncate text-foreground/90">{product.label}</span>
-                        <a 
-                          href={product.url} 
-                          target="_blank" 
+                        <span className="font-semibold truncate text-foreground/90" data-testid={`text-label-${product.id}`}>{product.label}</span>
+                        <a
+                          href={product.url}
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5 mt-1 truncate w-fit"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <ExternalLink className="h-3 w-3 inline" />
                           {getDomain(product.url)}
@@ -130,38 +234,40 @@ export default function Dashboard() {
                       <StatusBadge status={product.status} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {product.lastCheckedAt 
+                      {product.lastCheckedAt
                         ? formatDistanceToNow(new Date(product.lastCheckedAt), { addSuffix: true })
                         : "Never"}
                     </TableCell>
                     <TableCell className="text-center">
-                      <div className="flex justify-center">
-                        <Switch 
+                      <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+                        <Switch
                           checked={product.isActive}
                           onCheckedChange={(checked) => handleToggleActive(product.id, checked)}
                           disabled={updateProduct.isPending}
+                          data-testid={`switch-active-${product.id}`}
                         />
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button 
-                          variant="ghost" 
+                      <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
                           size="icon"
-                          onClick={() => handleCheckNow(product.id)}
+                          onClick={(e) => handleCheckNow(product.id, e)}
                           disabled={checkProduct.isPending && checkProduct.variables === product.id}
-                          className="h-8 w-8 text-muted-foreground hover:text-primary"
                           title="Check Now"
+                          data-testid={`button-check-${product.id}`}
                         >
                           <RefreshCw className={`h-4 w-4 ${checkProduct.isPending && checkProduct.variables === product.id ? 'animate-spin' : ''}`} />
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="icon"
-                          onClick={() => handleDelete(product.id)}
+                          onClick={(e) => { e.stopPropagation(); handleDelete(product.id); }}
                           disabled={deleteProduct.isPending && deleteProduct.variables === product.id}
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive transition-colors"
+                          className="text-muted-foreground"
                           title="Delete"
+                          data-testid={`button-delete-${product.id}`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -174,6 +280,64 @@ export default function Dashboard() {
           </Table>
         </div>
       </Card>
+
+      {/* History Dialog */}
+      <Dialog open={selectedProductId !== null} onOpenChange={(open) => { if (!open) setSelectedProductId(null); }}>
+        <DialogContent className="max-w-lg w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg" data-testid="text-history-title">
+              <History className="h-5 w-5" />
+              {selectedProduct?.label ?? "Product"} - Notifications
+            </DialogTitle>
+          </DialogHeader>
+
+          {selectedProduct && (
+            <div className="mb-4 text-sm text-muted-foreground space-y-1">
+              <p>Current status: <StatusBadge status={selectedProduct.status} /></p>
+              {selectedProduct.lastRawStatus && (
+                <p>Last detected: <span className="text-foreground">{selectedProduct.lastRawStatus}</span></p>
+              )}
+            </div>
+          )}
+
+          {historyLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Activity className="h-6 w-6 animate-pulse text-muted-foreground" />
+            </div>
+          ) : !history || history.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              No status changes recorded yet. Run a check to start tracking.
+            </div>
+          ) : (
+            <div className="space-y-3" data-testid="list-history">
+              {history.map((entry: any) => (
+                <div
+                  key={entry.id}
+                  className="flex items-start gap-3 p-3 rounded-md bg-muted/30 border border-border/30"
+                  data-testid={`history-entry-${entry.id}`}
+                >
+                  <div className="flex-shrink-0 mt-0.5">
+                    <div className="h-2 w-2 rounded-full bg-amber-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground/90">{entry.changeDescription}</p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                      <Badge variant="outline" className="text-xs no-default-active-elevate">
+                        {entry.status}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {entry.detectedAt
+                          ? format(new Date(entry.detectedAt), "MMM d, yyyy 'at' h:mm a")
+                          : "Unknown date"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }

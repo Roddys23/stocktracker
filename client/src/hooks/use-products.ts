@@ -78,11 +78,12 @@ export function useCheckProduct() {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to check product status");
-      return res.json() as Promise<{ success: boolean; status: string; rawStatus: string }>;
+      return res.json() as Promise<{ success: boolean; status: string; changes: string[] }>;
     },
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: [api.products.list.path] });
       queryClient.invalidateQueries({ queryKey: ["/api/products", id, "history"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products", id, "items"] });
     },
   });
 }
@@ -95,6 +96,20 @@ export function useProductHistory(productId: number | null) {
       const url = buildUrl(api.history.list.path, { id: productId });
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch history");
+      return res.json();
+    },
+    enabled: productId !== null,
+  });
+}
+
+export function usePageItems(productId: number | null) {
+  return useQuery({
+    queryKey: ["/api/products", productId, "items"],
+    queryFn: async () => {
+      if (!productId) return [];
+      const url = buildUrl(api.items.list.path, { id: productId });
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch page items");
       return res.json();
     },
     enabled: productId !== null,

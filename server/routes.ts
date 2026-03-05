@@ -80,13 +80,19 @@ export async function registerRoutes(
     }
 
     const result = await checkProductAndRecord(id);
-    res.json({ success: true, status: result.status, rawStatus: result.rawStatus });
+    res.json({ success: true, status: result.status, changes: result.changes });
   });
 
   app.get(api.history.list.path, async (req, res) => {
     const id = Number(req.params.id);
     const history = await storage.getHistoryByProduct(id);
     res.json(history);
+  });
+
+  app.get(api.items.list.path, async (req, res) => {
+    const id = Number(req.params.id);
+    const items = await storage.getPageItems(id);
+    res.json(items);
   });
 
   app.get(api.settings.get.path, async (req, res) => {

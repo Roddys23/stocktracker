@@ -12,6 +12,14 @@ export const products = pgTable("products", {
   isActive: boolean("is_active").notNull().default(true),
 });
 
+export const pageItems = pgTable("page_items", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  itemName: text("item_name").notNull(),
+  itemStatus: text("item_status").notNull().default("Unknown"),
+  lastSeenAt: timestamp("last_seen_at").defaultNow(),
+});
+
 export const statusHistory = pgTable("status_history", {
   id: serial("id").primaryKey(),
   productId: integer("product_id").notNull(),
@@ -39,6 +47,11 @@ export const insertStatusHistorySchema = createInsertSchema(statusHistory).omit(
   detectedAt: true,
 });
 
+export const insertPageItemSchema = createInsertSchema(pageItems).omit({
+  id: true,
+  lastSeenAt: true,
+});
+
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 
@@ -47,6 +60,9 @@ export type InsertSettings = z.infer<typeof insertSettingsSchema>;
 
 export type StatusHistory = typeof statusHistory.$inferSelect;
 export type InsertStatusHistory = z.infer<typeof insertStatusHistorySchema>;
+
+export type PageItem = typeof pageItems.$inferSelect;
+export type InsertPageItem = z.infer<typeof insertPageItemSchema>;
 
 export type CreateProductRequest = InsertProduct;
 export type UpdateProductRequest = Partial<InsertProduct>;

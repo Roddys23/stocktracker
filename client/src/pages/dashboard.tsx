@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatDistanceToNow, format } from "date-fns";
-import { Link2, RefreshCw, Trash2, Activity, ExternalLink, History, X } from "lucide-react";
-import { useProducts, useDeleteProduct, useUpdateProduct, useCheckProduct, useProductHistory } from "@/hooks/use-products";
+import { Link2, RefreshCw, Trash2, Activity, ExternalLink, History, Package } from "lucide-react";
+import { useProducts, useDeleteProduct, useUpdateProduct, useCheckProduct, useProductHistory, usePageItems } from "@/hooks/use-products";
 import { useToast } from "@/hooks/use-toast";
 import { Layout } from "@/components/layout";
 import { AddProductDialog } from "@/components/add-product-dialog";
@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,29 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+function ItemStatusBadge({ status }: { status: string }) {
+  const s = status.toLowerCase();
+  if (s === "in stock" || s === "new") {
+    return (
+      <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs no-default-active-elevate">
+        {status}
+      </Badge>
+    );
+  }
+  if (s === "out of stock") {
+    return (
+      <Badge variant="outline" className="bg-rose-500/10 text-rose-400 border-rose-500/20 text-xs no-default-active-elevate">
+        {status}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="bg-zinc-500/10 text-zinc-400 border-zinc-500/20 text-xs no-default-active-elevate">
+      {status}
+    </Badge>
+  );
+}
+
 export default function Dashboard() {
   const { data: products, isLoading } = useProducts();
   const deleteProduct = useDeleteProduct();
@@ -33,6 +57,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const { data: history, isLoading: historyLoading } = useProductHistory(selectedProductId);
+  const { data: pageItemsList, isLoading: itemsLoading } = usePageItems(selectedProductId);
 
   const selectedProduct = products?.find((p: any) => p.id === selectedProductId);
 
@@ -54,9 +79,12 @@ export default function Dashboard() {
     e.stopPropagation();
     checkProduct.mutate(id, {
       onSuccess: (data) => {
+        const desc = data.changes.length > 0
+          ? data.changes.slice(0, 3).join('; ')
+          : 'No changes detected';
         toast({
           title: "Check complete",
-          description: `Status: ${data.status} (detected: ${data.rawStatus})`
+          description: desc,
         });
       },
       onError: () => {
@@ -139,9 +167,7 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <Switch
                     checked={product.isActive}
-                    onCheckedChange={(checked) => {
-                      handleToggleActive(product.id, checked);
-                    }}
+                    onCheckedChange={(checked) => handleToggleActive(product.id, checked)}
                     disabled={updateProduct.isPending}
                     onClick={(e) => e.stopPropagation()}
                     data-testid={`switch-active-${product.id}`}
@@ -281,61 +307,88 @@ export default function Dashboard() {
         </div>
       </Card>
 
-      {/* History Dialog */}
+      {/* Product Detail Dialog with Tabs */}
       <Dialog open={selectedProductId !== null} onOpenChange={(open) => { if (!open) setSelectedProductId(null); }}>
-        <DialogContent className="max-w-lg w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-lg w-[calc(100vw-2rem)] max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg" data-testid="text-history-title">
               <History className="h-5 w-5" />
-              {selectedProduct?.label ?? "Product"} - Notifications
+              {selectedProduct?.label ?? "Product"}
             </DialogTitle>
           </DialogHeader>
 
-          {selectedProduct && (
-            <div className="mb-4 text-sm text-muted-foreground space-y-1">
-              <p>Current status: <StatusBadge status={selectedProduct.status} /></p>
-              {selectedProduct.lastRawStatus && (
-                <p>Last detected: <span className="text-foreground">{selectedProduct.lastRawStatus}</span></p>
-              )}
-            </div>
-          )}
+          <Tabs defaultValue="notifications" className="flex-1 min-h-0 flex flex-col">
+            <TabsList className="w-full" data-testid="tabs-detail">
+              <TabsTrigger value="notifications" className="flex-1" data-testid="tab-notifications">Notifications</TabsTrigger>
+              <TabsTrigger value="items" className="flex-1" data-testid="tab-items">Current Items</TabsTrigger>
+            </TabsList>
 
-          {historyLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Activity className="h-6 w-6 animate-pulse text-muted-foreground" />
-            </div>
-          ) : !history || history.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              No status changes recorded yet. Run a check to start tracking.
-            </div>
-          ) : (
-            <div className="space-y-3" data-testid="list-history">
-              {history.map((entry: any) => (
-                <div
-                  key={entry.id}
-                  className="flex items-start gap-3 p-3 rounded-md bg-muted/30 border border-border/30"
-                  data-testid={`history-entry-${entry.id}`}
-                >
-                  <div className="flex-shrink-0 mt-0.5">
-                    <div className="h-2 w-2 rounded-full bg-amber-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground/90">{entry.changeDescription}</p>
-                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                      <Badge variant="outline" className="text-xs no-default-active-elevate">
-                        {entry.status}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {entry.detectedAt
-                          ? format(new Date(entry.detectedAt), "MMM d, yyyy 'at' h:mm a")
-                          : "Unknown date"}
-                      </span>
-                    </div>
-                  </div>
+            <TabsContent value="notifications" className="flex-1 overflow-y-auto mt-4">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Activity className="h-6 w-6 animate-pulse text-muted-foreground" />
                 </div>
-              ))}
-            </div>
-          )}
+              ) : !history || history.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  No changes recorded yet. Run a check to start tracking.
+                </div>
+              ) : (
+                <div className="space-y-3" data-testid="list-history">
+                  {history.map((entry: any) => (
+                    <div
+                      key={entry.id}
+                      className="flex items-start gap-3 p-3 rounded-md bg-muted/30 border border-border/30"
+                      data-testid={`history-entry-${entry.id}`}
+                    >
+                      <div className="flex-shrink-0 mt-0.5">
+                        <div className="h-2 w-2 rounded-full bg-amber-400" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground/90">{entry.changeDescription}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          <ItemStatusBadge status={entry.status} />
+                          <span className="text-xs text-muted-foreground">
+                            {entry.detectedAt
+                              ? format(new Date(entry.detectedAt), "MMM d, yyyy 'at' h:mm a")
+                              : "Unknown date"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="items" className="flex-1 overflow-y-auto mt-4">
+              {itemsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Activity className="h-6 w-6 animate-pulse text-muted-foreground" />
+                </div>
+              ) : !pageItemsList || pageItemsList.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  No items found yet. Run a check to scan the page.
+                </div>
+              ) : (
+                <div className="space-y-2" data-testid="list-items">
+                  <p className="text-xs text-muted-foreground mb-3">{pageItemsList.length} item{pageItemsList.length !== 1 ? 's' : ''} found on this page</p>
+                  {pageItemsList.map((item: any) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between gap-3 p-3 rounded-md bg-muted/30 border border-border/30"
+                      data-testid={`page-item-${item.id}`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Package className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span className="text-sm truncate text-foreground/90">{item.itemName}</span>
+                      </div>
+                      <ItemStatusBadge status={item.itemStatus} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </Layout>

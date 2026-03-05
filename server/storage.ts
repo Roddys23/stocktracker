@@ -3,16 +3,18 @@ import {
   products,
   settings,
   statusHistory,
+  pageItems,
   type Product,
   type Settings,
   type StatusHistory,
+  type PageItem,
   type InsertProduct,
   type InsertSettings,
   type InsertStatusHistory,
   type UpdateProductRequest,
   type UpdateSettingsRequest
 } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, notInArray } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(): Promise<Product[]>;
@@ -26,6 +28,10 @@ export interface IStorage {
 
   createHistoryEntry(entry: InsertStatusHistory): Promise<StatusHistory>;
   getHistoryByProduct(productId: number): Promise<StatusHistory[]>;
+
+  getPageItems(productId: number): Promise<PageItem[]>;
+  upsertPageItem(productId: number, itemName: string, itemStatus: string): Promise<PageItem>;
+  removeStalePageItems(productId: number, currentItemNames: string[]): Promise<string[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -53,6 +59,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteProduct(id: number): Promise<void> {
+    await db.delete(pageItems).where(eq(pageItems.productId, id));
     await db.delete(statusHistory).where(eq(statusHistory.productId, id));
     await db.delete(products).where(eq(products.id, id));
   }
@@ -85,6 +92,55 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(statusHistory)
       .where(eq(statusHistory.productId, productId))
       .orderBy(desc(statusHistory.detectedAt));
+  }
+
+  async getPageItems(productId: number): Promise<PageItem[]> {
+    return await db.select().from(pageItems)
+      .where(eq(pageItems.productId, productId))
+      .orderBy(pageItems.itemName);
+  }
+
+  async upsertPageItem(productId: number, itemName: string, itemStatus: string): Promise<PageItem> {
+    const now = new Date();
+    const existing = await db.select().from(pageItems)
+      .where(and(eq(pageItems.productId, productId), eq(pageItems.itemName, itemName)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const [updated] = await db.update(pageItems)
+        .set({ itemStatus, lastSeenAt: now })
+        .where(eq(pageItems.id, existing[0].id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(pageItems)
+        .values({ productId, itemName, itemStatus })
+        .returning();
+      return created;
+    }
+  }
+
+  async removeStalePageItems(productId: number, currentItemNames: string[]): Promise<string[]> {
+    if (currentItemNames.length === 0) {
+      const removed = await db.select().from(pageItems).where(eq(pageItems.productId, productId));
+      await db.delete(pageItems).where(eq(pageItems.productId, productId));
+      return removed.map(r => r.itemName);
+    }
+
+    const stale = await db.select().from(pageItems)
+      .where(and(
+        eq(pageItems.productId, productId),
+        notInArray(pageItems.itemName, currentItemNames)
+      ));
+
+    if (stale.length > 0) {
+      await db.delete(pageItems).where(and(
+        eq(pageItems.productId, productId),
+        notInArray(pageItems.itemName, currentItemNames)
+      ));
+    }
+
+    return stale.map(s => s.itemName);
   }
 }
 

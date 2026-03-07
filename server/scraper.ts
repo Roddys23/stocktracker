@@ -7,6 +7,8 @@ interface ScrapedItem {
   status: string;
 }
 
+const MAX_PAGES = 50;
+
 const PRODUCT_SELECTORS = [
   '.product-card',
   '.product-item',
@@ -98,19 +100,65 @@ function getItemName(el: cheerio.Cheerio<cheerio.Element>, $: cheerio.CheerioAPI
   return null;
 }
 
-export async function scrapePageItems(url: string): Promise<ScrapedItem[]> {
+const FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.5',
+};
+
+function findNextPageUrl($: cheerio.CheerioAPI, currentUrl: string): string | null {
+  const nextLink = $('a[rel="next"]');
+  if (nextLink.length) {
+    const href = nextLink.attr('href');
+    if (href) return resolveUrl(href, currentUrl);
+  }
+
+  const nextSelectors = [
+    'a.next',
+    '.pagination a.next',
+    '.pagination-next a',
+    'a[aria-label="Next"]',
+    'a[aria-label="Next page"]',
+    '.pagination__next',
+    'link[rel="next"]',
+  ];
+
+  for (const sel of nextSelectors) {
+    const el = $(sel);
+    if (el.length) {
+      const href = el.attr('href');
+      if (href) return resolveUrl(href, currentUrl);
+    }
+  }
+
+  const allLinks = $('a');
+  for (let i = 0; i < allLinks.length; i++) {
+    const el = $(allLinks[i]);
+    const text = el.text().trim();
+    if (text === 'Next' || text === '›' || text === '»' || text === 'Next →' || text === 'Next Page') {
+      const href = el.attr('href');
+      if (href) return resolveUrl(href, currentUrl);
+    }
+  }
+
+  return null;
+}
+
+function resolveUrl(href: string, baseUrl: string): string {
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      }
-    });
+    return new URL(href, baseUrl).href;
+  } catch {
+    return href;
+  }
+}
+
+async function scrapeSinglePage(url: string): Promise<{ items: ScrapedItem[]; nextUrl: string | null }> {
+  try {
+    const response = await fetch(url, { headers: FETCH_HEADERS });
 
     if (!response.ok) {
       console.error(`Error fetching ${url}: Status ${response.status}`);
-      return [];
+      return { items: [], nextUrl: null };
     }
 
     const html = await response.text();
@@ -148,13 +196,67 @@ export async function scrapePageItems(url: string): Promise<ScrapedItem[]> {
 
       const title = $('title').text().trim() || $('h1').first().text().trim() || 'Page';
       items.push({ name: title, status: pageStatus });
+      return { items, nextUrl: null };
     }
 
-    return items;
+    const nextUrl = findNextPageUrl($, url);
+    return { items, nextUrl };
   } catch (error) {
     console.error(`Error scraping ${url}:`, error);
-    return [];
+    return { items: [], nextUrl: null };
   }
+}
+
+export async function scrapePageItems(url: string): Promise<ScrapedItem[]> {
+  const allItems: ScrapedItem[] = [];
+  const seenNames = new Set<string>();
+  let currentUrl: string | null = url;
+  let pageCount = 0;
+
+  while (currentUrl && pageCount < MAX_PAGES) {
+    pageCount++;
+    console.log(`Scraping page ${pageCount}: ${currentUrl}`);
+
+    const { items, nextUrl } = await scrapeSinglePage(currentUrl);
+
+    let newItemsOnThisPage = 0;
+    for (const item of items) {
+      const key = item.name.toLowerCase();
+      if (!seenNames.has(key)) {
+        seenNames.add(key);
+        allItems.push(item);
+        newItemsOnThisPage++;
+      }
+    }
+
+    if (newItemsOnThisPage === 0 && pageCount > 1) {
+      console.log(`No new items found on page ${pageCount}, stopping pagination.`);
+      break;
+    }
+
+    if (nextUrl && nextUrl !== currentUrl) {
+      currentUrl = nextUrl;
+    } else {
+      try {
+        const parsed = new URL(currentUrl);
+        const currentPage = parseInt(parsed.searchParams.get('page') || '1', 10);
+        if (pageCount === 1 && items.length > 1) {
+          parsed.searchParams.set('page', String(currentPage + 1));
+          currentUrl = parsed.href;
+        } else {
+          currentUrl = null;
+        }
+      } catch {
+        currentUrl = null;
+      }
+    }
+  }
+
+  if (pageCount > 1) {
+    console.log(`Pagination complete: scraped ${pageCount} pages, found ${allItems.length} total items.`);
+  }
+
+  return allItems;
 }
 
 export async function checkProductAndRecord(productId: number): Promise<{ status: string; changes: string[] }> {

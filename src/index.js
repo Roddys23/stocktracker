@@ -5,98 +5,226 @@ if (process.env.NODE_ENV !== 'production') {
   try { require('dotenv').config(); } catch (_) { /* dotenv optional */ }
 }
 
+const path = require('path');
 const express = require('express');
-const { initDb, loadItems, upsertItem } = require('./db');
+const {
+  initDb,
+  loadItems,
+  upsertItem,
+  listTrackedUrls,
+  listActiveTrackedUrls,
+  createTrackedUrl,
+  deleteTrackedUrl,
+  updateTrackedUrlCheck,
+  getSetting,
+  setSetting,
+} = require('./db');
 const { scrape } = require('./scraper');
 const { notify } = require('./discord');
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-/**
- * Comma-separated list of shop URLs to monitor.
- * e.g. SHOP_URLS=https://example.com/collections/all,https://shop2.com/stock
- */
 const SHOP_URLS = (process.env.SHOP_URLS || '')
   .split(',')
   .map((u) => u.trim())
   .filter(Boolean);
 
 const INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-const PORT        = parseInt(process.env.PORT || '3000', 10);
-
-// ---------------------------------------------------------------------------
-// Express server
-// ---------------------------------------------------------------------------
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 const app = express();
+const publicDir = path.join(__dirname, '..', 'public');
 
-/** Keep-alive endpoint – hit by an external pinger every 14 minutes */
+app.use(express.json());
+app.use(express.static(publicDir));
+
 app.get('/health', (_req, res) => {
   res.send('OK');
 });
 
-// ---------------------------------------------------------------------------
-// Scrape + diff logic
-// ---------------------------------------------------------------------------
-
-/**
- * Run one full scrape cycle for every configured URL.
- */
-async function runScrape() {
-  if (SHOP_URLS.length === 0) {
-    console.warn('[tracker] No SHOP_URLS configured – skipping scrape.');
-    return;
+function normalizeHttpUrl(rawUrl) {
+  try {
+    const parsed = new URL(String(rawUrl || '').trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return parsed.toString();
+  } catch (_) {
+    return null;
   }
+}
+
+function deriveNameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}`;
+  } catch (_) {
+    return url;
+  }
+}
+
+async function seedEnvUrlsIfNeeded() {
+  const existing = await listTrackedUrls();
+  if (existing.length > 0 || SHOP_URLS.length === 0) return;
 
   for (const url of SHOP_URLS) {
     try {
-      console.log(`[tracker] Starting scrape for ${url}`);
-      const [scraped, stored] = await Promise.all([
-        scrape(url),
-        loadItems(url),
-      ]);
-
-      for (const item of scraped) {
-        const prev = stored.get(item.itemId);
-
-        if (!prev) {
-          // Brand-new item we have never seen before
-          await upsertItem(url, item.itemId, item.name, item.inStock);
-          if (item.inStock) {
-            await notify('new', item.name, url);
-          }
-        } else if (!prev.inStock && item.inStock) {
-          // Was out-of-stock, now back in stock
-          await upsertItem(url, item.itemId, item.name, item.inStock);
-          await notify('restock', item.name, url);
-        } else {
-          // No relevant change – still update last_seen / name
-          await upsertItem(url, item.itemId, item.name, item.inStock);
-        }
-      }
-
-      console.log(`[tracker] Finished scrape for ${url}`);
+      await createTrackedUrl(url, deriveNameFromUrl(url));
     } catch (err) {
-      console.error(`[tracker] Error scraping ${url}:`, err.message);
+      console.error(`[tracker] Failed to seed URL ${url}:`, err.message);
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Bootstrap
-// ---------------------------------------------------------------------------
+app.get('/api/urls', async (_req, res) => {
+  try {
+    const urls = await listTrackedUrls();
+    res.json(urls);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load tracked URLs.' });
+  }
+});
+
+app.post('/api/urls', async (req, res) => {
+  const normalized = normalizeHttpUrl(req.body && req.body.url);
+  const providedName = req.body && typeof req.body.name === 'string'
+    ? req.body.name.trim().slice(0, 150)
+    : '';
+
+  if (!normalized) {
+    res.status(400).json({ error: 'Please provide a valid http/https URL.' });
+    return;
+  }
+
+  try {
+    const created = await createTrackedUrl(normalized, providedName || deriveNameFromUrl(normalized));
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(500).json({ error: 'Unable to create tracked URL.' });
+  }
+});
+
+app.delete('/api/urls/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: 'Invalid URL id.' });
+    return;
+  }
+
+  try {
+    const deleted = await deleteTrackedUrl(id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Tracked URL not found.' });
+      return;
+    }
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: 'Unable to delete tracked URL.' });
+  }
+});
+
+app.get('/api/settings/webhook', async (_req, res) => {
+  try {
+    const webhookUrl = await getSetting('discord_webhook_url');
+    res.json({ webhookUrl: webhookUrl || '' });
+  } catch (err) {
+    res.status(500).json({ error: 'Unable to load webhook setting.' });
+  }
+});
+
+app.post('/api/settings/webhook', async (req, res) => {
+  const webhookUrl = String((req.body && req.body.webhookUrl) || '').trim();
+
+  if (webhookUrl.length > 0) {
+    const normalized = normalizeHttpUrl(webhookUrl);
+    if (!normalized) {
+      res.status(400).json({ error: 'Please provide a valid webhook URL.' });
+      return;
+    }
+  }
+
+  try {
+    await setSetting('discord_webhook_url', webhookUrl);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Unable to save webhook setting.' });
+  }
+});
+
+app.post('/api/scrape-now', async (_req, res) => {
+  if (isScraping) {
+    res.status(409).json({ error: 'A scrape is already in progress. Please wait.' });
+    return;
+  }
+  // Fire and forget — respond immediately so the UI doesn't hang
+  runScrape().catch((err) => console.error('[scrape-now] Error:', err.message));
+  res.json({ message: 'Scrape started.' });
+});
+
+let isScraping = false;
+
+async function runScrape() {
+  if (isScraping) {
+    console.log('[tracker] Previous scrape still running - skipping this interval.');
+    return;
+  }
+
+  isScraping = true;
+
+  try {
+    const activeUrls = await listActiveTrackedUrls();
+
+    if (activeUrls.length === 0) {
+      console.warn('[tracker] No tracked URLs configured - skipping scrape.');
+      return;
+    }
+
+    for (const tracked of activeUrls) {
+      const { id, url } = tracked;
+      let changedThisCycle = false;
+
+      try {
+        console.log(`[tracker] Starting scrape for ${url}`);
+        const [scraped, stored] = await Promise.all([
+          scrape(url),
+          loadItems(url),
+        ]);
+
+        for (const item of scraped) {
+          const prev = stored.get(item.itemId);
+
+          if (!prev) {
+            changedThisCycle = true;
+            await upsertItem(url, item.itemId, item.name, item.inStock);
+            if (item.inStock) {
+              await notify('new', item.name, url);
+            }
+          } else if (!prev.inStock && item.inStock) {
+            changedThisCycle = true;
+            await upsertItem(url, item.itemId, item.name, item.inStock);
+            await notify('restock', item.name, url);
+          } else {
+            await upsertItem(url, item.itemId, item.name, item.inStock);
+          }
+        }
+
+        await updateTrackedUrlCheck(id, changedThisCycle, null);
+        console.log(`[tracker] Finished scrape for ${url}`);
+      } catch (err) {
+        await updateTrackedUrlCheck(id, false, err.message || 'Unknown scrape error');
+        console.error(`[tracker] Error scraping ${url}:`, err.message);
+      }
+    }
+  } finally {
+    isScraping = false;
+  }
+}
 
 async function main() {
-  // Initialise DB (creates table if missing)
   await initDb();
+  await seedEnvUrlsIfNeeded();
 
-  // Run an immediate scrape on startup, then every 15 minutes
   runScrape();
   setInterval(runScrape, INTERVAL_MS);
 
-  // Start HTTP server
   app.listen(PORT, () => {
     console.log(`[server] Listening on port ${PORT}`);
     console.log(`[server] Health endpoint: http://localhost:${PORT}/health`);

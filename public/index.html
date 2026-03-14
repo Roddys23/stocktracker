@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StockTracker Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="ambient"></div>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Stock Monitoring</p>
+        <h1>StockTracker</h1>
+      </div>
+      <p class="subtitle">Manage tracked URLs and alerts from one place.</p>
+    </header>
+
+    <nav class="tab-nav" aria-label="Sections">
+      <button class="tab-btn is-active" data-tab="urls" type="button">Tracked URLs</button>
+      <button class="tab-btn" data-tab="settings" type="button">Settings</button>
+    </nav>
+
+    <section class="panel is-active" id="tab-urls">
+      <form id="url-form" class="card form-grid">
+        <h2>Add URL</h2>
+        <label>
+          URL Name
+          <input id="url-name" type="text" maxlength="150" placeholder="Example: Main store" />
+        </label>
+        <label>
+          Store URL
+          <input id="url-value" type="url" required placeholder="https://shop.example.com/collections/all" />
+        </label>
+        <button class="btn btn-primary" type="submit">Add URL</button>
+        <p id="url-form-feedback" class="feedback" role="status" aria-live="polite"></p>
+      </form>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Tracked URL List</h2>
+          <div class="section-head-actions">
+            <button id="scrape-now" class="btn btn-primary" type="button">Run Now</button>
+            <button id="refresh-urls" class="btn btn-ghost" type="button">Refresh</button>
+          </div>
+        </div>
+        <p id="scrape-feedback" class="feedback" role="status" aria-live="polite"></p>
+        <div id="url-list" class="url-list"></div>
+      </section>
+    </section>
+
+    <section class="panel" id="tab-settings">
+      <form id="webhook-form" class="card form-grid">
+        <h2>Discord Webhook</h2>
+        <label>
+          Webhook URL
+          <input id="webhook-url" type="url" placeholder="https://discord.com/api/webhooks/..." />
+        </label>
+        <button class="btn btn-primary" type="submit">Save Settings</button>
+        <p id="webhook-feedback" class="feedback" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <template id="url-card-template">
+    <article class="url-card">
+      <div>
+        <h3 class="url-name"></h3>
+        <p class="url-value"></p>
+      </div>
+      <div class="url-meta">
+        <span class="status-chip"></span>
+        <small class="last-check"></small>
+      </div>
+      <button class="btn btn-danger delete-url" type="button">Delete</button>
+    </article>
+  </template>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

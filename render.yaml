@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: stocktracker
+    runtime: node
+    buildCommand: npm install && npx playwright install chromium --with-deps
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # Set in Render dashboard
+      - key: DISCORD_WEBHOOK_URL
+        sync: false          # Set in Render dashboard
+      - key: SHOP_URLS
+        sync: false          # Comma-separated list of shop URLs to monitor
+      - key: PORT
+        value: "3000"
+      - key: NODE_ENV
+        value: production
+
+databases:
+  - name: stocktracker-db
+    databaseName: stocktracker
+    user: stocktracker
+    plan: free

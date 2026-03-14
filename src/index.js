@@ -236,3 +236,16 @@ main().catch((err) => {
   console.error('[main] Fatal error:', err);
   process.exit(1);
 });
+
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 10000;
+
+// Simple health check for Render
+app.get('/', (req, res) => {
+  res.send('Tracker is running!');
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is listening on port ${PORT}`);
+});

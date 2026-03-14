@@ -1,3 +1,16 @@
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 10000;
+
+// Render will ping this to make sure your app hasn't crashed
+app.get('/', (req, res) => {
+  res.send('Stock Tracker is Active and Scanning...');
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Web heartbeat started on port ${PORT}`);
+});
+
 'use strict';
 
 // Load .env file when running locally (not on Render)

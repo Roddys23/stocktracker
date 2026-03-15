@@ -10,6 +10,7 @@ const pool = new Pool({
 async function initDb() {
   const client = await pool.connect();
   try {
+    await client.query('DROP TABLE IF EXISTS items;');
     // 1. Table for individual items found on pages
     await client.query(`
       CREATE TABLE IF NOT EXISTS items (

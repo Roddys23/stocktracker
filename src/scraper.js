@@ -3,103 +3,82 @@
 const { chromium } = require('playwright-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Apply stealth plugin to avoid bot-detection on Render IPs
 chromium.use(StealthPlugin());
 
-/**
- * Selectors used to find product cards on a page.
- * Adjust these to match the shop you are tracking.
- */
 const ITEM_SELECTOR = '[data-product-id], .product-item, .product-card, article.product';
 const NAME_SELECTOR = '.product-title, .product-name, h2, h3';
-const OOS_SELECTOR  = '.sold-out, .out-of-stock, [data-availability="false"]';
-const NEXT_SELECTOR = 'a[rel="next"], a.next, .pagination__next, button.next-page';
+const OOS_SELECTOR  = '.sold-out, .out-of-stock, [data-availability="false"], .is-oos';
+const NEXT_SELECTOR = 'a[rel="next"], a.next, .pagination__next';
 
-/**
- * Scrape all items from a URL, following pagination.
- * Returns a flat array of { itemId, name, inStock } objects.
- *
- * @param {import('playwright').Page} page  – an already-open Playwright page
- * @param {string} url                      – starting URL
- * @returns {Promise<Array<{itemId: string, name: string, inStock: boolean}>>}
- */
 async function scrapeAllPages(page, url) {
   const results = [];
   let currentUrl = url;
+  const domain = new URL(url).hostname; // Get domain to make IDs unique
 
   while (currentUrl) {
     console.log(`[scraper] Visiting ${currentUrl}`);
-    await page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-
-    // Wait for the network to be idle so JS-rendered content is present
-    await page.waitForLoadState('networkidle').catch(() => {
-      // networkidle may time-out on some pages; fall back gracefully
-    });
+    try {
+      await page.goto(currentUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      // Short wait for dynamic content
+      await page.waitForTimeout(2000); 
+    } catch (err) {
+      console.error(`[scraper] Failed to load ${currentUrl}:`, err.message);
+      break; 
+    }
 
     const items = await page.$$eval(
       ITEM_SELECTOR,
-      (nodes, oosSelector, nameSelector) =>
+      (nodes, oosSelector, nameSelector, domainName) =>
         nodes.map((node) => {
           const nameEl = node.querySelector(nameSelector) || node;
-          const name    = (nameEl.textContent || '').trim().slice(0, 200);
-          const itemId  =
-            node.dataset.productId ||
-            node.dataset.variantId ||
-            node.id ||
-            (node.querySelector('a') || {}).href ||
-            name.toLowerCase().replace(/\s+/g, '-');
-          const inStock = !node.querySelector(oosSelector);
+          const name = (nameEl.textContent || '').trim().slice(0, 200);
+          
+          // Create a unique ID combining domain + original ID
+          const rawId = node.dataset.productId || 
+                        node.dataset.variantId || 
+                        node.id || 
+                        name.toLowerCase().replace(/\s+/g, '-');
+          
+          const itemId = `${domainName}-${rawId}`;
+          const inStock = !node.querySelector(oosSelector) && !node.innerText.toLowerCase().includes('sold out');
+          
           return { itemId, name, inStock };
         }),
       OOS_SELECTOR,
       NAME_SELECTOR,
+      domain
     );
 
     results.push(...items);
 
-    // Check for a "Next" pagination link
+    // Check for "Next" button
     const nextHref = await page.$eval(
       NEXT_SELECTOR,
-      (el) => el.href || el.getAttribute('data-url') || null,
+      (el) => el.href || null
     ).catch(() => null);
 
-    currentUrl = nextHref || null;
+    // Safety check: don't loop forever if nextHref is same as current
+    currentUrl = (nextHref && nextHref !== currentUrl) ? nextHref : null;
   }
 
   return results;
 }
 
-/**
- * Launch a browser, scrape the given URL (with all pages), then close the browser.
- * @param {string} url
- * @returns {Promise<Array<{itemId: string, name: string, inStock: boolean}>>}
- */
 async function scrape(url) {
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
 
   const context = await browser.newContext({
-    userAgent:
-      process.env.SCRAPER_USER_AGENT ||
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-      'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-      'Chrome/131.0.0.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     viewport: { width: 1280, height: 800 },
-    locale: 'en-GB',
   });
 
   const page = await context.newPage();
 
   try {
     const items = await scrapeAllPages(page, url);
-    console.log(`[scraper] Found ${items.length} item(s) across all pages for ${url}`);
     return items;
   } finally {
     await browser.close();

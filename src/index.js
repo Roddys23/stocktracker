@@ -259,20 +259,17 @@ app.get('/', (req, res) => {
   res.send('Tracker is running!');
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is listening on port ${PORT}`);
-});
-
+// 1. Define everything first
 const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// This is the "Heartbeat" route Render looks for
+// 2. Define the route
 app.get('/', (req, res) => {
   res.send('Tracker is active and scanning every 15 minutes.');
 });
 
-// Start the server
+// 3. Finally, start the server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Heartbeat server listening on port ${PORT}`);
 });

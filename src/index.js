@@ -1,19 +1,6 @@
-const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-// Render will ping this to make sure your app hasn't crashed
-app.get('/', (req, res) => {
-  res.send('Stock Tracker is Active and Scanning...');
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Web heartbeat started on port ${PORT}`);
-});
-
 'use strict';
 
-// Load .env file when running locally (not on Render)
+// 1. Setup Environment and Dependencies
 if (process.env.NODE_ENV !== 'production') {
   try { require('dotenv').config(); } catch (_) { /* dotenv optional */ }
 }
@@ -35,49 +22,51 @@ const {
 const { scrape } = require('./scraper');
 const { notify } = require('./discord');
 
+// 2. Initialize Express
+const app = express();
+const PORT = process.env.PORT || 10000;
+const publicDir = path.join(__dirname, '..', 'public');
+
+app.use(express.json());
+app.use(express.static(publicDir));
+
+// 3. Heartbeat / Health Routes for Render
+app.get('/', (req, res) => {
+  res.send('Tracker is active and scanning every 15 minutes.');
+});
+
+app.get('/health', (_req, res) => {
+  res.send('OK');
+});
+
+// 4. Configuration Constants
 const SHOP_URLS = (process.env.SHOP_URLS || '')
   .split(',')
   .map((u) => u.trim())
   .filter(Boolean);
 
 const INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-const PORT = parseInt(process.env.PORT || '3000', 10);
+let isScraping = false;
 
-const app = express();
-const publicDir = path.join(__dirname, '..', 'public');
-
-app.use(express.json());
-app.use(express.static(publicDir));
-
-app.get('/health', (_req, res) => {
-  res.send('OK');
-});
-
+// 5. Helper Functions
 function normalizeHttpUrl(rawUrl) {
   try {
     const parsed = new URL(String(rawUrl || '').trim());
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
     return parsed.toString();
-  } catch (_) {
-    return null;
-  }
+  } catch (_) { return null; }
 }
 
 function deriveNameFromUrl(url) {
   try {
     const parsed = new URL(url);
     return `${parsed.hostname}${parsed.pathname}`;
-  } catch (_) {
-    return url;
-  }
+  } catch (_) { return url; }
 }
 
 async function seedEnvUrlsIfNeeded() {
   const existing = await listTrackedUrls();
   if (existing.length > 0 || SHOP_URLS.length === 0) return;
-
   for (const url of SHOP_URLS) {
     try {
       await createTrackedUrl(url, deriveNameFromUrl(url));
@@ -87,189 +76,97 @@ async function seedEnvUrlsIfNeeded() {
   }
 }
 
+// 6. API Routes for the Frontend
 app.get('/api/urls', async (_req, res) => {
-  try {
-    const urls = await listTrackedUrls();
-    res.json(urls);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to load tracked URLs.' });
-  }
+  try { res.json(await listTrackedUrls()); } 
+  catch (err) { res.status(500).json({ error: 'Failed to load tracked URLs.' }); }
 });
 
 app.post('/api/urls', async (req, res) => {
   const normalized = normalizeHttpUrl(req.body && req.body.url);
-  const providedName = req.body && typeof req.body.name === 'string'
-    ? req.body.name.trim().slice(0, 150)
-    : '';
-
-  if (!normalized) {
-    res.status(400).json({ error: 'Please provide a valid http/https URL.' });
-    return;
-  }
-
+  const providedName = req.body && typeof req.body.name === 'string' ? req.body.name.trim().slice(0, 150) : '';
+  if (!normalized) return res.status(400).json({ error: 'Provide a valid URL.' });
   try {
     const created = await createTrackedUrl(normalized, providedName || deriveNameFromUrl(normalized));
     res.status(201).json(created);
-  } catch (err) {
-    res.status(500).json({ error: 'Unable to create tracked URL.' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Unable to create URL.' }); }
 });
 
 app.delete('/api/urls/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id) || id <= 0) {
-    res.status(400).json({ error: 'Invalid URL id.' });
-    return;
-  }
-
   try {
     const deleted = await deleteTrackedUrl(id);
-    if (!deleted) {
-      res.status(404).json({ error: 'Tracked URL not found.' });
-      return;
-    }
+    if (!deleted) return res.status(404).json({ error: 'Not found.' });
     res.status(204).end();
-  } catch (err) {
-    res.status(500).json({ error: 'Unable to delete tracked URL.' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Unable to delete.' }); }
 });
 
 app.get('/api/settings/webhook', async (_req, res) => {
-  try {
-    const webhookUrl = await getSetting('discord_webhook_url');
-    res.json({ webhookUrl: webhookUrl || '' });
-  } catch (err) {
-    res.status(500).json({ error: 'Unable to load webhook setting.' });
-  }
+  try { res.json({ webhookUrl: (await getSetting('discord_webhook_url')) || '' }); } 
+  catch (err) { res.status(500).json({ error: 'Error loading webhook.' }); }
 });
 
 app.post('/api/settings/webhook', async (req, res) => {
   const webhookUrl = String((req.body && req.body.webhookUrl) || '').trim();
-
-  if (webhookUrl.length > 0) {
-    const normalized = normalizeHttpUrl(webhookUrl);
-    if (!normalized) {
-      res.status(400).json({ error: 'Please provide a valid webhook URL.' });
-      return;
-    }
-  }
-
   try {
     await setSetting('discord_webhook_url', webhookUrl);
     res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Unable to save webhook setting.' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Error saving webhook.' }); }
 });
 
 app.post('/api/scrape-now', async (_req, res) => {
-  if (isScraping) {
-    res.status(409).json({ error: 'A scrape is already in progress. Please wait.' });
-    return;
-  }
-  // Fire and forget — respond immediately so the UI doesn't hang
+  if (isScraping) return res.status(409).json({ error: 'Scrape in progress.' });
   runScrape().catch((err) => console.error('[scrape-now] Error:', err.message));
   res.json({ message: 'Scrape started.' });
 });
 
-let isScraping = false;
-
+// 7. Core Scraping Logic
 async function runScrape() {
-  if (isScraping) {
-    console.log('[tracker] Previous scrape still running - skipping this interval.');
-    return;
-  }
-
+  if (isScraping) return;
   isScraping = true;
-
   try {
     const activeUrls = await listActiveTrackedUrls();
-
-    if (activeUrls.length === 0) {
-      console.warn('[tracker] No tracked URLs configured - skipping scrape.');
-      return;
-    }
-
     for (const tracked of activeUrls) {
       const { id, url } = tracked;
       let changedThisCycle = false;
-
       try {
-        console.log(`[tracker] Starting scrape for ${url}`);
-        const [scraped, stored] = await Promise.all([
-          scrape(url),
-          loadItems(url),
-        ]);
-
+        console.log(`[tracker] Scraping ${url}`);
+        const [scraped, stored] = await Promise.all([scrape(url), loadItems(url)]);
         for (const item of scraped) {
           const prev = stored.get(item.itemId);
-
-          if (!prev) {
+          if (!prev || (!prev.inStock && item.inStock)) {
             changedThisCycle = true;
             await upsertItem(url, item.itemId, item.name, item.inStock);
-            if (item.inStock) {
-              await notify('new', item.name, url);
-            }
-          } else if (!prev.inStock && item.inStock) {
-            changedThisCycle = true;
-            await upsertItem(url, item.itemId, item.name, item.inStock);
-            await notify('restock', item.name, url);
+            if (item.inStock) await notify(prev ? 'restock' : 'new', item.name, url);
           } else {
             await upsertItem(url, item.itemId, item.name, item.inStock);
           }
         }
-
         await updateTrackedUrlCheck(id, changedThisCycle, null);
-        console.log(`[tracker] Finished scrape for ${url}`);
       } catch (err) {
-        await updateTrackedUrlCheck(id, false, err.message || 'Unknown scrape error');
-        console.error(`[tracker] Error scraping ${url}:`, err.message);
+        await updateTrackedUrlCheck(id, false, err.message);
+        console.error(`[tracker] Error:`, err.message);
       }
     }
-  } finally {
-    isScraping = false;
-  }
+  } finally { isScraping = false; }
 }
 
+// 8. Main Entry Point
 async function main() {
   await initDb();
   await seedEnvUrlsIfNeeded();
 
-  runScrape();
+  // Start the background interval
   setInterval(runScrape, INTERVAL_MS);
+  runScrape(); // Initial run
 
-  app.listen(PORT, () => {
-    console.log(`[server] Listening on port ${PORT}`);
-    console.log(`[server] Health endpoint: http://localhost:${PORT}/health`);
-    console.log(`[tracker] Scrape interval: every ${INTERVAL_MS / 60_000} minutes`);
+  // Start the heartbeat server
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[server] Live on port ${PORT}`);
   });
 }
 
 main().catch((err) => {
   console.error('[main] Fatal error:', err);
   process.exit(1);
-});
-
-const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-// Simple health check for Render
-app.get('/', (req, res) => {
-  res.send('Tracker is running!');
-});
-
-// 1. Define everything first
-const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 10000;
-
-// 2. Define the route
-app.get('/', (req, res) => {
-  res.send('Tracker is active and scanning every 15 minutes.');
-});
-
-// 3. Finally, start the server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Heartbeat server listening on port ${PORT}`);
 });

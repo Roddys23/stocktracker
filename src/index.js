@@ -136,10 +136,10 @@ async function runScrape() {
           const prev = stored.get(item.itemId);
           if (!prev || (!prev.inStock && item.inStock)) {
             changedThisCycle = true;
-            await upsertItem(url, item.itemId, item.name, item.inStock);
-            if (item.inStock) await notify(prev ? 'restock' : 'new', item.name, url);
+            await upsertItem({ url, itemId: item.itemId, name: item.name, inStock: item.inStock });
+            if (item.inStock) await notify({ type: prev ? 'restock' : 'new', name: item.name, url });
           } else {
-            await upsertItem(url, item.itemId, item.name, item.inStock);
+            await upsertItem({ url, itemId: item.itemId, name: item.name, inStock: item.inStock });
           }
         }
         await updateTrackedUrlCheck(id, changedThisCycle, null);

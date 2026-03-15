@@ -28,4 +28,16 @@ async function initDb() {
   }
 }
 
-module.exports = { pool, initDb };
+module.exports = { 
+  pool, 
+  initDb, 
+  loadItems, 
+  upsertItem, 
+  listTrackedUrls,        // <--- Make sure this is here
+  listActiveTrackedUrls,  // <--- And this
+  createTrackedUrl, 
+  deleteTrackedUrl, 
+  updateTrackedUrlCheck, 
+  getSetting, 
+  setSetting 
+};
